@@ -301,6 +301,31 @@ def save_chat_history(question, answer):
         "answer": answer
     })
 
+def display_messages():
+    for idx, msg in enumerate(st.session_state.messages):
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if msg["role"] == "assistant":
+                feedback_options = ["", "good", "bad"]
+                feedback_default = st.session_state.feedback_values.get(idx, "")
+                feedback = st.radio(
+                    "이 답변은 만족스러웠나요?",
+                    feedback_options,
+                    key=f"feedback_{idx}",
+                    index=feedback_options.index(feedback_default)
+                )
+                st.session_state.feedback_values[idx] = feedback
+
+
+def save_feedback(index, answer, selected):
+    if "feedbacks" not in st.session_state:
+        st.session_state.feedbacks = []
+    st.session_state.feedbacks.append({
+        "index": index,
+        "answer": answer,
+        "feedback": selected
+    })
+
 # history를 문자열로 합침 (질문/답변 모두 포함)
 def get_history_text():
     history = ""
@@ -342,11 +367,15 @@ elif mode == "Chatbot":
         st.session_state.messages = []
     if "last_contexts" not in st.session_state:
         st.session_state.last_contexts = []
+    if "feedback_values" not in st.session_state:
+        st.session_state.feedback_values = {}
+
     
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            
+    # for msg in st.session_state.messages:
+    #     with st.chat_message(msg["role"]):
+    #         st.markdown(msg["content"])
+    display_messages()
+
     user_input = st.chat_input("질문을 입력하세요:")
     
     if user_input:
@@ -390,5 +419,7 @@ elif mode == "Chatbot":
             #st.write(final_response)
             # 히스토리 출력
             st.session_state.messages.append({"role": "assistant", "content": final_response})
-            with st.chat_message("assistant"):
-                st.markdown(final_response)
+            # with st.chat_message("assistant"):
+            #     st.markdown(final_response)   
+            st.rerun()
+        
