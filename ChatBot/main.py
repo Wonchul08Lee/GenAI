@@ -19,6 +19,7 @@ import docx2txt
 import tempfile
 from finetune_LoRA import lora_finetune_from_feedback
 from feedback import display_messages, save_feedback
+from collections import Counter
 
 from load_model import (
     embedding_model_id,
@@ -30,6 +31,7 @@ from load_model import (
     tokenizer_opt,
 )
 
+persist_directory = "./chromaDB_Chatbot"
 
 def load_word_documents_docx2txt(uploaded_file):    
     # Streamlit 업로드 파일 처리
@@ -193,10 +195,8 @@ def save_chat_history(question, answer):
     """
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    st.session_state.chat_history.append({
-        "question": question,
-        "answer": answer
-    })
+
+    st.session_state.chat_history.append({"question": question,"answer": answer})
 
 # history를 문자열로 합침 (질문/답변 모두 포함)
 def get_history_text():
@@ -212,10 +212,17 @@ def truncate_context(text, max_len=512):
         tokens = tokens[-max_len:]  # 뒤쪽 최근 내용만 유지
     return " ".join(tokens)
 
+def session_state_init():
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
+    if "last_contexts" not in st.session_state:
+        st.session_state.last_contexts = []
+    if "feedback_values" not in st.session_state:
+        st.session_state.feedback_values = {}
 
 # --- Streamlit UI ---
 mode = st.sidebar.radio("모드를 선택하세요:", ("데이터 저장", "Chatbot"))
-persist_directory = "./chromaDB_Chatbot"
+
 
 if mode == "데이터 저장":
     st.header("Word 문서 업로드 및 ChromaDB 저장")
@@ -223,15 +230,15 @@ if mode == "데이터 저장":
     uploaded_file = st.file_uploader("Word 파일 업로드", type=["docx"])
     if uploaded_file is None:
         st.warning("Word 파일을 업로드해주세요.")
-    else:
-       
+    else:       
         with st.spinner("문서 처리 중..."):
             sentences = load_word_documents_docx2txt(uploaded_file)
+
         st.success(f"{uploaded_file.name} 는 성공적으로 로드되었습니다.")
         
         docs = [Document(page_content=s) for s in sentences]  # 각 문장을 Document로 변환
-        if st.button("ChromaDB에 저장"):
-            
+        
+        if st.button("ChromaDB에 저장"):            
             with st.spinner("ChromaDB 저장 중..."):
                 save_vectorDB_with_progress(docs, persist_directory)
             st.success("문서가 ChromaDB에 성공적으로 저장되었습니다.")
@@ -242,13 +249,9 @@ elif mode == "Chatbot":
     tab1, tab2 = st.tabs(["Chatbot", "Finetune"])
     with tab1:
         # 세션 상태에 질문/답변 리스트 초기화
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
-        if "last_contexts" not in st.session_state:
-            st.session_state.last_contexts = []
-        if "feedback_values" not in st.session_state:
-            st.session_state.feedback_values = {}
+        session_state_init()
 
+        # display messages with feedback options
         display_messages()
 
         user_input = st.chat_input("질문을 입력하세요:")
@@ -268,11 +271,12 @@ elif mode == "Chatbot":
                 if len(full_query) < 10:
                     full_query = user_input
 
+                # VectorDB 로드하여 QA 실행
                 vector_db = load_vectorDB(persist_directory)
                 result, best_context = run_qa(full_query, vector_db, qa_model_id, tokenizer_opt)
 
                 # 생성형 모델 준비
-                gen_llm = prepare_gen_pipeline()                    
+                gen_llm = prepare_gen_pipeline()
                 prompt = get_prompt_template()
 
                 chain = prompt | gen_llm
@@ -282,6 +286,8 @@ elif mode == "Chatbot":
                     "context": best_context,
                     "answer": result['answer']
                 })
+
+                # 중복 문장 제거
                 final_response = remove_duplicate_sentences(final_response)
                 final_response = ". ".join(list(dict.fromkeys(final_response.split(". "))))
 
@@ -294,7 +300,7 @@ elif mode == "Chatbot":
         if st.button("피드백으로 LoRA 파인튜닝 실행"):
             feedbacks = st.session_state.get("feedbacks", [])
             st.write(f"수집된 피드백 개수: {len(feedbacks)}")
-            from collections import Counter
+            
             label_counts = Counter([f["feedback"] for f in feedbacks])
             if len(feedbacks) < 2:
                 st.info("done")
