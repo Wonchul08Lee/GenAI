@@ -7,12 +7,16 @@ from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_huggingface import HuggingFacePipeline
 from typing import List, Literal, Optional, TypedDict
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoModelForSequenceClassification, pipeline, TrainingArguments, Trainer
 from langgraph.graph import StateGraph, END
 from langchain_core.prompts import PromptTemplate
 from langchain_core.chat_history import InMemoryChatMessageHistory
+from sklearn.model_selection import train_test_split
 import uuid
-
+import torch
+from datasets import Dataset
+from peft import LoraConfig, get_peft_model, TaskType
+import numpy as np
 import re
 import docx2txt
 import tempfile
@@ -316,6 +320,105 @@ def display_messages():
                 )
                 st.session_state.feedback_values[idx] = feedback
 
+                 # 피드백 저장
+                if feedback in ("good", "bad"):
+                    if "feedbacks" not in st.session_state:
+                        st.session_state.feedbacks = []
+                    # 중복 방지
+                    exists = False
+                    for f in st.session_state.feedbacks:
+                        if f.get("index") == idx:
+                            f["feedback"] = feedback
+                            exists = True
+                            break
+                    if not exists:
+                        st.session_state.feedbacks.append({
+                            "index": idx,
+                            "question": msg.get("question", ""),
+                            "answer": msg["content"],
+                            "feedback": feedback
+                        })
+
+# --- LoRA 파인튜닝 함수 ---
+def lora_finetune_from_feedback():
+    # 1. 피드백 데이터 준비
+    feedbacks = st.session_state.get("feedbacks", [])
+    if not feedbacks:
+        st.warning("피드백 데이터가 없습니다.")
+        return
+
+    df = pd.DataFrame(feedbacks)
+    df["labels"] = df["feedback"].map({"good": 1, "bad": 0})
+    # 질문 또는 답변 중 원하는 컬럼 사용
+    df["text"] = df["answer"]
+
+    # 2. 데이터셋 분할
+    train_df, test_df = train_test_split(df, test_size=0.2, random_state=0, stratify=df['labels'])
+    train_dataset = Dataset.from_pandas(train_df)
+    test_dataset = Dataset.from_pandas(test_df)
+
+    # 3. 모델 및 LoRA 설정
+    model_name = "beomi/kcbert-base"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=2)
+    peft_config = LoraConfig(
+        task_type=TaskType.SEQ_CLS,
+        r=8,
+        lora_alpha=16,
+        lora_dropout=0.1,
+        bias="none",
+        target_modules=["query", "value"],
+    )
+    model = get_peft_model(model, peft_config)
+
+    # 4. 데이터 전처리
+    def preprocess(data):
+        return tokenizer(data['text'], padding='max_length', truncation=True, max_length=64)
+    train_dataset = train_dataset.map(preprocess, batched=True)
+    test_dataset = test_dataset.map(preprocess, batched=True)
+
+    # 5. Trainer 및 파인튜닝
+    training_args = TrainingArguments(
+        output_dir="./saved_models/peft_lora_feedback",
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=1,
+        load_best_model_at_end=True,
+        metric_for_best_model="accuracy",
+        greater_is_better=True,
+        num_train_epochs=3,
+        per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
+        logging_dir="./logs",
+        logging_steps=10,
+        label_names=["labels"],
+        use_cpu=True,
+    )
+
+    def compute_metrics(predict):
+        preds = np.argmax(predict.predictions, axis=1)
+        acc = (preds == predict.label_ids).mean()
+        return {"accuracy": acc}
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=test_dataset,
+        compute_metrics=compute_metrics,
+    )
+
+    trainer.train()
+    st.success("LoRA 파인튜닝 완료!")
+
+    # 6. 평가 및 추론 예시
+    test_texts = ["이 제품 너무 좋아요!", "별로예요. 추천 안함."]
+    inputs = tokenizer(test_texts, padding=True, truncation=True, max_length=64, return_tensors="pt")
+    model.eval()
+    with torch.no_grad():
+        outputs = model(**inputs)
+        predictions = torch.argmax(outputs.logits, dim=1)
+        st.write("테스트 결과 :", predictions.tolist())  # 1은 긍정, 0은 부정
 
 def save_feedback(index, answer, selected):
     if "feedbacks" not in st.session_state:
@@ -421,5 +524,10 @@ elif mode == "Chatbot":
             st.session_state.messages.append({"role": "assistant", "content": final_response})
             # with st.chat_message("assistant"):
             #     st.markdown(final_response)   
+            
+            
             st.rerun()
+            
+    if st.button("피드백으로 LoRA 파인튜닝 실행"):
+        lora_finetune_from_feedback()
         
