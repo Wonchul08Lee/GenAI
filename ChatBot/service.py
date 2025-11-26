@@ -48,11 +48,14 @@ def filter_qa_tokenizer_opts(opts):
 @st.cache_resource
 def load_QA_model(tokenizer_opt):
     safe_opts = {"truncation": True, "max_length": 512, "stride": 128, "padding": "max_length"}
+    
     qa_pipeline = pipeline(
         task="question-answering",
         model=qa_model_id,
         tokenizer_kwargs=safe_opts,
-        device=-1 
+        max_length=512,
+        stride = 128,
+        device=-1
     )
     return qa_pipeline
 
