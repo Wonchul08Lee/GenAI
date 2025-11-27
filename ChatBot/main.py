@@ -16,6 +16,7 @@ from datasets import Dataset
 import numpy as np
 import re
 import docx2txt
+from docx import Document as DocxDocument
 import tempfile
 from finetune_LoRA import lora_finetune_from_feedback
 from feedback import display_messages, save_feedback
@@ -68,6 +69,7 @@ def load_word_documents_docx2txt(uploaded_file):
 
     st.write(f"문장 개수: {len(sentences)}")
     return sentences
+
 
 def save_vectorDB_with_progress(docs, persist_directory):
     embedding_model = load_embedding_model()  # HuggingFaceEmbeddings

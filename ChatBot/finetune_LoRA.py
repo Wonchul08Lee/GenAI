@@ -41,7 +41,7 @@ def lora_finetune_from_feedback(feedbacks):
 	trainer.train()
 	print("LoRA 파인튜닝 완료!")
 
-	test_texts = ["이 제품 너무 좋아요!", "별로예요. 추천 안함."]
+	test_texts = ["이 답변 너무 좋아요!", "별로예요. 추천 안함."]
 	inputs = tokenizer(test_texts, padding=True, truncation=True, max_length=64, return_tensors="pt")
 	model.eval()
 	with torch.no_grad():
