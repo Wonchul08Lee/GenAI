@@ -8,6 +8,7 @@
    ## b. 필요 libarary 설치 (@가상환경)
       (Gen) C:\...> $ pip install jupyter
       (Gen) C:\...> $ pin install streamlit
+      (Gen) C:\...> $ pin install chromadb
 
 # 2.Vscode 에서 Jupyter 환경 사용
    ### Python interpreter 
